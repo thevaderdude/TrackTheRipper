@@ -1,0 +1,4 @@
+Requests==2.32.3
+soundcloud_lib==0.6.1
+youtube_search==2.1.2
+yt_dlp==2025.1.26
