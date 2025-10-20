@@ -3,6 +3,7 @@ import requests
 from urllib.parse import quote
 import time
 from youtube_search import YoutubeSearch
+import dsp_secrets
 
 def search_youtube(search_term, limit=5):
     results = YoutubeSearch(search_term, max_results=limit).to_dict()
@@ -42,7 +43,7 @@ def search_soundcloud(search_term, limit=5, retries=4):
             'comments': result['comment_count'],
             'date': result['created_at'].split('T')[0],
             'duration_ms': result['duration'],
-            'duration_formatted': f'{result["duration"]//(1000 * 60)}:{(result["duration"]//1000)%60}',
+            'duration_formatted': f'{result["duration"]//(1000 * 60)}:{(result["duration"]//1000)%60:02d}',
             'likes': result['likes_count'],
             'plays': result['playback_count'],
             'artist': result.get('publisher_metadata').get('artist') if result.get('publisher_metadata') is not None else '',
@@ -58,6 +59,6 @@ def search_soundcloud(search_term, limit=5, retries=4):
 def soundcloud_url_call(search_term, limit):
     saerch_term_formatted = quote(search_term)
     url_temp = "https://api-v2.soundcloud.com/search/tracks?q={query}&client_id={client_id}&limit={limit}&offset={offset}"
-    r_url = url_temp.format(query=saerch_term_formatted, client_id="yNSW5UvBmb1A5j7qPUtIMuB9Itx3jsOC", limit=str(limit), offset="0")
+    r_url = url_temp.format(query=saerch_term_formatted, client_id=dsp_secrets.sc_client_id, limit=str(limit), offset="0")
     res = requests.get(r_url)
     return res.json()

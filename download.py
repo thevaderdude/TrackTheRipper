@@ -5,7 +5,7 @@ api = SoundcloudAPI()
 
 
 
-def download_yt(url, filepath):
+def download_yt(url, filepath, format='wav'):
 
     URLS = [url]
     ydl_opts = {
@@ -13,7 +13,7 @@ def download_yt(url, filepath):
     # ℹ️ See help(yt_dlp.postprocessor) for a list of available Postprocessors and their arguments
     'postprocessors': [{  # Extract audio using ffmpeg
         'key': 'FFmpegExtractAudio',
-        'preferredcodec': 'wav',
+        'preferredcodec': format,
     }],
     'paths': {
         'home': filepath
@@ -21,8 +21,12 @@ def download_yt(url, filepath):
 }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        file_path = ydl.prepare_filename(info)
         error_code = ydl.download(URLS)
-
+        print(file_path)
+    
+    return file_path
 
 def download_sc(url, filepath):
     track = api.resolve(url)
@@ -33,3 +37,5 @@ def download_sc(url, filepath):
     
     with open(filename, 'wb+') as file:
         track.write_mp3_to(file)
+    
+    return filename
