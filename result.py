@@ -20,7 +20,7 @@ class Result:
 
         # create into transformed vars
         self.yt_results = [ResultElement(res, type='yt') for res in self.yt_results_raw]
-        self.sc_results = [ResultElement(res, type='sc') for res in self.sc_results_raw]
+        self.sc_results = [ResultElement(res, type='sc') for res in self.sc_results_raw] if len(self.sc_results_raw) > 0 else []
 
         self.is_downloaded = False
 

@@ -19,7 +19,10 @@ ss.setdefault("results", [])                    # list aligned to items_snapshot
 ss.setdefault("done", 0)
 ss.setdefault("total", 0)
 ss.setdefault("executor", None)
-ss.setdefault("items_snapshot", None)           # frozen items for the current run
+ss.setdefault("items_snapshot", None)
+ss.setdefault("search_results", None)
+
+           # frozen items for the current run
 
 def do_rerun():
     if hasattr(st, 'rerun'):
@@ -80,22 +83,34 @@ if submitted:
     # search
     yt_results_raw = search.search_youtube(search_term=search_term)
     sc_results_raw = search.search_soundcloud(search_term=search_term)    
-
     # construct obj
-    search_results = result.Result(
+    ss.search_results = result.Result(
         search_term=search_term,
         yt_results=yt_results_raw,
         sc_results=sc_results_raw
     )
+    # display all names
+
     # download
     # search_results.download_all()
-    start_job(s_result=search_results, max_workers=8)
-    st.header(f'Showing Results for {search_term}')
+    start_job(s_result=ss.search_results, max_workers=8)
 
-status = st.empty()
+# status = st.empty()
 bar = st.progress(0 if st.session_state.total == 0 else st.session_state.done / max(1, st.session_state.total))
-log = st.container()
+# log = st.container()
 
+if ss.search_results:
+    col1, col2 = st.columns(2)
+    with col1:
+        for res in ss.search_results.yt_results:
+            st.write(res.title)
+            st.image(res.cover, width=127)
+            st.divider()
+    with col2:
+        for res in ss.search_results.sc_results:
+            st.write(res.title)
+            st.image(res.cover, width=100)
+            st.divider()
 if ss.job_running:
     # Drain ALL available messages this pass (no time window)
     while True:
@@ -118,27 +133,29 @@ if ss.job_running:
     # Update progress + status
     if ss.total > 0:
         bar.progress(ss.done / ss.total)
-        status.write(f"Processed {ss.done}/{ss.total}")
+        # status.write(f"Processed {ss.done}/{ss.total}")
     else:
-        status.warning("Starting…")
-
-    with log:
-        for i, res in enumerate(ss.results):
-            if res is None:
-                st.write(f"{i+1}. …working…")
-            elif isinstance(res, str) and res.startswith("ERROR:"):
-                st.error(f"{i+1}. {res}")
-            else:
-                st.write(f"{i+1}. {res}")
-
+        # status.warning("Starting…")
+        pass
+    
+#    with log:
+#        for i, res in enumerate(ss.results):
+#            if res is None:
+#                st.write(f"{i+1}. …working…")
+#            elif isinstance(res, str) and res.startswith("ERROR:"):
+#                st.error(f"{i+1}. {res}")
+#            else:
+#                st.write(f"{i+1}. {res}")
     # Finish or keep refreshing
     if ss.done >= ss.total and ss.total > 0:
-        status.success("All done!")
+        # status.success("All done!")
         bar.progress(1.0)
         ss.job_running = False
         if ss.executor:
             ss.executor.shutdown(wait=False)
             ss.executor = None
+        # ok now add containers of fields
+        # st.text(ss.search_results.get_results()[0].title)
     else:
         # keep heartbeat going
         time.sleep(0.2)
@@ -147,14 +164,17 @@ if ss.job_running:
 else:
     # idle view
     if ss.items_snapshot:
-        status.info(f"Idle. Last run finished: {ss.done}/{ss.total}.")
-        with log:
-            for i, res in enumerate(ss.results):
-                if res is None:
-                    st.write(f"{i+1}. —")
-                elif isinstance(res, str) and res.startswith("ERROR:"):
-                    st.error(f"{i+1}. {res}")
-                else:
-                    st.write(f"{i+1}. {res}")
-    else:
-        status.write("Idle. Submit a search to begin.")
+        pass
+        # status.info(f"Idle. Last run finished: {ss.done}/{ss.total}.")
+        
+#        with log:
+#            for i, res in enumerate(ss.results):
+#                if res is None:
+#                    st.write(f"{i+1}. —")
+#                elif isinstance(res, str) and res.startswith("ERROR:"):
+#                    st.error(f"{i+1}. {res}")
+#                else:
+#                    st.write(f"{i+1}. {res}")
+#    else:
+#       status.write("Idle. Submit a search to begin.")
+    
