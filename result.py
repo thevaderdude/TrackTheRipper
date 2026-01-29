@@ -4,6 +4,8 @@ import shutil
 import os
 import uuid
 
+import util
+
 class Result:
     _DL_PATH = 'test_downloads'
 
@@ -38,6 +40,8 @@ class Result:
 
 class ResultElement:
 
+    _IMG_SIZE = (100, 100)
+
     def __init__(self, attrs, type):
         self.attrs_raw = attrs
         self.type = type
@@ -45,7 +49,7 @@ class ResultElement:
         print(attrs)
 
         if type == 'yt':
-            self.cover = attrs['thumbnail']
+            self.cover_url = attrs['thumbnail']
             self.url = attrs['url']
             self.duration_formatted = attrs['duration']
             self.title = attrs['title']
@@ -53,12 +57,16 @@ class ResultElement:
             self.plays_formatted = attrs['views']
 
         elif type == 'sc':
-            self.cover = attrs['cover']
+            self.cover_url = attrs['cover']
             self.url = attrs['link']
             self.duration_formatted = attrs['duration_formatted']
             self.title = attrs['title']
             self.artist = attrs['artist'] if attrs['artist'] != '' else attrs['username']
             self.plays_formatted = f"{attrs['plays']:,}"
+
+        # crop images
+        self.cover = util.get_img_from_url(self.cover_url, size=(self._IMG_SIZE))
+
 
         self.file_location = None
 

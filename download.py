@@ -37,5 +37,7 @@ def download_sc(url, filepath):
     
     with open(filename, 'wb+') as file:
         track.write_mp3_to(file)
+
+    print(f'{filename} downloaded')
     
     return filename

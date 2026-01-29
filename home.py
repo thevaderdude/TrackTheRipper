@@ -9,7 +9,33 @@ import result
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import queue
+import util
 
+
+TITLE_FIX_MD = """
+    <div style="
+        height: 3em; 
+        line-height: 1.5em;
+        overflow: hidden; 
+        text-overflow: ellipsis;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        white-space: normal;
+        font-size: 1.17em;  /* h3 size */
+        font-weight: 600;
+        margin: 0.4em 0;
+    ">
+        {t}
+    </div>
+        """
+
+LOGO_SIZE = (10, 10)
+
+
+yt_logo = util.get_img_from_url('https://www.youtube.com/s/desktop/3fd9a6f6/img/favicon_32x32.png')
+
+sc_logo = util.get_img_from_url('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS3UekB8iVVIJpXNMQrflhVKClcRdc_JKAPIw&s')
 
 
 ss = st.session_state
@@ -100,17 +126,68 @@ bar = st.progress(0 if st.session_state.total == 0 else st.session_state.done / 
 # log = st.container()
 
 if ss.search_results:
+    # youtube
     col1, col2 = st.columns(2)
     with col1:
         for res in ss.search_results.yt_results:
-            st.write(res.title)
-            st.image(res.cover, width=127)
-            st.divider()
+            with st.container(border=True, gap=None):
+                with st.container(vertical_alignment='bottom', gap=None):
+                    artist_col, download_col = st.columns([0.78, 0.22], vertical_alignment="center")
+                    with artist_col:
+                        st.markdown(f'*{res.artist}*')
+                    with download_col:
+                        if st.button('Save', key=f'save{res.artist}{res.title}{res.plays_formatted}'):
+                            pass
+                with st.container():
+                    title_col, logo_col = st.columns([0.9, 0.1], vertical_alignment="center")
+                    with title_col:
+                        st.markdown(TITLE_FIX_MD.format(t=res.title), unsafe_allow_html=True)
+                    with logo_col:
+                        st.image(yt_logo)
+                st.space(size='small')
+                cover_col, views_len_col = st.columns([0.5, 0.5], vertical_alignment='center')
+                with cover_col:
+                    st.image(res.cover)
+                with views_len_col:
+                    st.markdown(res.duration_formatted)
+                    st.markdown(f'**{res.plays_formatted}**')
+    # soundcloud
     with col2:
         for res in ss.search_results.sc_results:
-            st.write(res.title)
-            st.image(res.cover, width=100)
-            st.divider()
+            with st.container(border=True, gap=None):
+                with st.container(vertical_alignment='bottom', gap=None):
+                    artist_col, download_col = st.columns([0.78, 0.22], vertical_alignment="center")
+                    with artist_col:
+                        st.markdown(f'*{res.artist}*')
+                    with download_col:
+                        if st.button('Save', key=f'save{res.artist}{res.title}{res.plays_formatted}'):
+                            pass
+                with st.container():
+                    title_col, logo_col = st.columns([0.9, 0.1], vertical_alignment="center")
+                    with title_col:
+                        st.markdown(TITLE_FIX_MD.format(t=res.title), unsafe_allow_html=True)
+                    with logo_col:
+                        st.image(sc_logo)
+                st.space(size='small')
+                cover_col, views_len_col = st.columns([0.5, 0.5], vertical_alignment='center')
+                with cover_col:
+                    st.image(res.cover)
+                with views_len_col:
+                    st.markdown(res.duration_formatted)
+                    st.markdown(f'**{res.plays_formatted}** plays')
+    # likes
+    # length, views
+    # preview, download
+
+# purge button deletes all files not associated with current query
+if st.button('Purge Cached Files'):
+    # get current state id
+    cur_id = None
+    if ss.search_results:
+        cur_id = ss.search_results.id
+    # remove all files in folder except one with current id
+    util.remove_all_except_current(cur_id=cur_id, download_path=result.Result._DL_PATH)
+
 if ss.job_running:
     # Drain ALL available messages this pass (no time window)
     while True:
