@@ -1,7 +1,8 @@
 import yt_dlp
 from sclib import SoundcloudAPI, Track, Playlist
+import dsp_secrets
 
-api = SoundcloudAPI()  
+api = SoundcloudAPI(client_id=dsp_secrets.sc_client_id)  
 
 
 

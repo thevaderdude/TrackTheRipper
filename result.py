@@ -75,10 +75,19 @@ class ResultElement:
     def download(self, filepath):
         if self.type == 'yt':
             self.file_location = download.download_yt(self.url, filepath=filepath, format='mp3')
+            if self.file_location[-4:] != '.mp3':
+                self.file_location = self.file_location[:-4] + '.mp3'
         elif self.type == 'sc':
             self.file_location = download.download_sc(self.url, filepath=filepath)
         
         self.is_downloaded = True
+    
+    def get_audio(self):
+        if self.is_downloaded:
+            audio_file = open(self.file_location, "rb")
+            audio_bytes = audio_file.read()
+            return audio_bytes
+        return b''
 
     def save_track(self, download_path):
         if self.type == 'sc':

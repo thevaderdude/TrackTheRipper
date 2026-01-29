@@ -119,11 +119,13 @@ if submitted:
 
     # download
     # search_results.download_all()
-    start_job(s_result=ss.search_results, max_workers=8)
+    start_job(s_result=ss.search_results, max_workers=10)
 
 # status = st.empty()
 bar = st.progress(0 if st.session_state.total == 0 else st.session_state.done / max(1, st.session_state.total))
 # log = st.container()
+
+#TODO: add option do download preview
 
 if ss.search_results:
     # youtube
@@ -137,7 +139,7 @@ if ss.search_results:
                         st.markdown(f'*{res.artist}*')
                     with download_col:
                         if st.button('Save', key=f'save{res.artist}{res.title}{res.plays_formatted}'):
-                            pass
+                            res.save_track(download_path='saved_tracks')
                 with st.container():
                     title_col, logo_col = st.columns([0.9, 0.1], vertical_alignment="center")
                     with title_col:
@@ -151,6 +153,8 @@ if ss.search_results:
                 with views_len_col:
                     st.markdown(res.duration_formatted)
                     st.markdown(f'**{res.plays_formatted}**')
+                st.space(size='small')
+                st.audio(res.get_audio(), format='audio/mpeg', end_time=60)
     # soundcloud
     with col2:
         for res in ss.search_results.sc_results:
@@ -161,7 +165,7 @@ if ss.search_results:
                         st.markdown(f'*{res.artist}*')
                     with download_col:
                         if st.button('Save', key=f'save{res.artist}{res.title}{res.plays_formatted}'):
-                            pass
+                            res.save_track(download_path='saved_tracks')
                 with st.container():
                     title_col, logo_col = st.columns([0.9, 0.1], vertical_alignment="center")
                     with title_col:
@@ -175,6 +179,8 @@ if ss.search_results:
                 with views_len_col:
                     st.markdown(res.duration_formatted)
                     st.markdown(f'**{res.plays_formatted}** plays')
+                st.space(size='small')
+                st.audio(res.get_audio(), format='audio/mpeg', end_time=60)
     # likes
     # length, views
     # preview, download
