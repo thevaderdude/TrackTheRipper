@@ -35,6 +35,8 @@ LOGO_SIZE = (10, 10)
 
 yt_logo = util.get_img_from_url('https://www.youtube.com/s/desktop/3fd9a6f6/img/favicon_32x32.png')
 
+
+# TODO: fix logo sizing
 sc_logo = util.get_img_from_url('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS3UekB8iVVIJpXNMQrflhVKClcRdc_JKAPIw&s')
 
 
@@ -89,7 +91,7 @@ def start_job(s_result: result.Result, max_workers: int):
 
 
 
-st.title('Track the Ripper')
+st.title('search2mp3')
 
 
 with st.form('search'):
