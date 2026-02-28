@@ -2,22 +2,11 @@
 
 ## Spotify API
 
-### 1. Test (debug) – `test_spotify.py`
+The app uses **user OAuth** when available (so the non-deprecated Get Playlist Items API works). Run `spotify_user_auth.py` once, then the app and tests use that token. Falls back to client credentials if no user token (client credentials get 401 on Get Playlist Items).
 
-Prints whether **client credentials** and (if set up) **user auth** can call the Spotify API, and shows full errors.
+### 1. User login (one-time) – `spotify_user_auth.py`
 
-```bash
-python scripts/test_spotify.py
-python scripts/test_spotify.py "https://open.spotify.com/playlist/..."
-```
-
-- **Section 1:** App-only (client credentials) + `playlist_tracks`. Often **403** in Development Mode.
-- **Section 2:** Same playlist_tracks call with that client.
-- **Section 3:** User OAuth (if you’ve run `spotify_user_auth.py`). Use this to confirm user auth works.
-
-### 2. User login (one-time) – `spotify_user_auth.py`
-
-Run once to log in with your Spotify account. Saves a token so the app can read your playlists without logging in again.
+Run once to log in with your Spotify account. Saves a token to `.spotify_oauth_cache` so the app can read playlists.
 
 **Before running:**
 
@@ -29,7 +18,7 @@ Run once to log in with your Spotify account. Saves a token so the app can read 
    Save.
 
 2. **User allowlist (Development Mode)**  
-   In the same app → **User management** → add your Spotify email so you can authorize.
+   In the same app → **User management** → add your Spotify email.
 
 **Run:**
 
@@ -37,14 +26,17 @@ Run once to log in with your Spotify account. Saves a token so the app can read 
 python scripts/spotify_user_auth.py
 ```
 
-- A browser window opens for Spotify login.
-- A local server on port 8080 receives the callback (or you paste the redirect URL if the server isn’t used).
-- On success, the token is saved to `.spotify_oauth_cache` in the project root (gitignored).
+A browser opens for Spotify login; on success the token is saved to `.spotify_oauth_cache` (gitignored).
 
-After that, the main app and `test_spotify.py` will use this user token when calling the Spotify API (and fall back to client credentials if the cache is missing or invalid).
+### 2. Test (debug) – `test_spotify.py`
 
-**Optional:** To use a different redirect URI, set it in `dsp_secrets.py`:
+Checks client credentials token and, if you have a user token, playlist access via Get Playlist Items.
 
-```python
-spotify_redirect_uri = "http://127.0.0.1:8080/callback"  # must match Dashboard
+```bash
+python scripts/test_spotify.py
+python scripts/test_spotify.py "https://open.spotify.com/playlist/..."
 ```
+
+- **Section 1:** Client credentials (token only; playlist/items will 401 with app token).
+- **Section 2:** Same token, one page of playlist items (likely 401 without user auth).
+- **Section 3:** User OAuth from `.spotify_oauth_cache`; should succeed if you ran `spotify_user_auth.py`.

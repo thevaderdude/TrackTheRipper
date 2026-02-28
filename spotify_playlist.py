@@ -2,8 +2,11 @@
 Spotify playlist → best-match YT/SC pipeline.
 Fetches playlist tracks, scores candidates by views, title similarity, and length,
 then downloads with ARTIST - TITLE filenames.
-Uses user OAuth token if available (run scripts/spotify_user_auth.py once), else client credentials.
+Uses user OAuth if available (run scripts/spotify_user_auth.py once), else client credentials.
+Uses non-deprecated Get Playlist Items API. requests + Spotify Web API URLs (no spotipy).
 """
+import base64
+import json
 import os
 import re
 import time
@@ -11,13 +14,18 @@ import difflib
 from typing import Optional
 from urllib.parse import urlparse
 
+import requests
+
 import dsp_secrets
 import search
 import download
 
-# User auth: cache file and redirect URI (must match Spotify Dashboard)
+# Spotify Web API endpoints (like cURL in the docs)
+SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
+SPOTIFY_API_BASE = "https://api.spotify.com/v1"
+
+# User auth: cache file (redirect URI is in spotify_user_auth.py)
 _SPOTIFY_CACHE_PATH = os.path.join(os.path.dirname(__file__), ".spotify_oauth_cache")
-_SPOTIFY_REDIRECT_URI = getattr(dsp_secrets, "spotify_redirect_uri", "http://127.0.0.1:8080/callback")
 
 # Scoring weights (tunable)
 WEIGHT_VIEWS = 0.4
@@ -29,6 +37,18 @@ MIN_DURATION_RATIO = 0.7
 # Test playlist URLs (for tests)
 PLAYLIST_URL_1 = "https://open.spotify.com/playlist/37i9dQZEVXd2ZWQqzKbAfl?si=26bf0aed73f04856"
 PLAYLIST_URL_2 = "https://open.spotify.com/playlist/37i9dQZF1E8LQ8CR1hh5Oz?si=a9c8f73dff4941d4"
+
+# Default user-owned playlist for testing (works with Get Playlist Items + user OAuth)
+DEFAULT_USER_PLAYLIST_URL = "https://open.spotify.com/playlist/43KVtpxkc3rlkdyGZYCiQk?si=0b848c1afc2440c5"
+
+# Fields to request from Get Playlist Items (track details for downstream: name, artists, duration, album)
+# Non-deprecated endpoint uses "item" for the track object in the response
+PLAYLIST_ITEMS_FIELDS = "total,limit,offset,items(added_at,item(name,duration_ms,artists(name),album(name)))"
+
+
+def _track_from_playlist_item(entry: dict) -> Optional[dict]:
+    """Get track object from a playlist item. Supports both 'item' (current) and 'track' (legacy) keys."""
+    return entry.get("item") or entry.get("track")
 
 
 def parse_playlist_id(url_or_id: str) -> Optional[str]:
@@ -60,39 +80,129 @@ def parse_playlist_id(url_or_id: str) -> Optional[str]:
     return None
 
 
-def get_spotify_client():
-    """
-    Return a spotipy.Spotify client, preferring user OAuth token if .spotify_oauth_cache
-    exists and is valid, otherwise client credentials. Returns None only if both fail.
-    """
-    import spotipy
-    from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
-    from spotipy.cache_handler import CacheFileHandler
-
-    if os.path.isfile(_SPOTIFY_CACHE_PATH):
-        try:
-            cache_handler = CacheFileHandler(cache_path=_SPOTIFY_CACHE_PATH)
-            auth = SpotifyOAuth(
-                client_id=dsp_secrets.spotify_client_id,
-                client_secret=dsp_secrets.spotify_client_secret,
-                redirect_uri=_SPOTIFY_REDIRECT_URI,
-                scope="playlist-read-private playlist-read-collaborative",
-                cache_handler=cache_handler,
-                open_browser=False,
-            )
-            token_info = auth.validate_token(cache_handler.get_cached_token())
-            if token_info is not None:
-                if auth.is_token_expired(token_info):
-                    token_info = auth.refresh_access_token(token_info["refresh_token"])
-                    cache_handler.save_token_to_cache(token_info)
-                return spotipy.Spotify(auth=token_info["access_token"])
-        except Exception:
-            pass
-    client = SpotifyClientCredentials(
-        client_id=dsp_secrets.spotify_client_id,
-        client_secret=dsp_secrets.spotify_client_secret,
+def _request_client_credentials_token() -> str:
+    """Get access token via Client Credentials flow. Raises on failure."""
+    data = {"grant_type": "client_credentials"}
+    auth = base64.b64encode(
+        f"{dsp_secrets.spotify_client_id}:{dsp_secrets.spotify_client_secret}".encode()
+    ).decode()
+    r = requests.post(
+        SPOTIFY_TOKEN_URL,
+        data=data,
+        headers={"Authorization": f"Basic {auth}", "Content-Type": "application/x-www-form-urlencoded"},
+        timeout=15,
     )
-    return spotipy.Spotify(client_credentials_manager=client)
+    r.raise_for_status()
+    return r.json()["access_token"]
+
+
+def _load_oauth_cache() -> Optional[dict]:
+    """Load token info from .spotify_oauth_cache. Returns None if missing or invalid JSON."""
+    if not os.path.isfile(_SPOTIFY_CACHE_PATH):
+        return None
+    try:
+        with open(_SPOTIFY_CACHE_PATH, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _save_oauth_cache(token_info: dict) -> None:
+    """Write token info to .spotify_oauth_cache."""
+    with open(_SPOTIFY_CACHE_PATH, "w") as f:
+        json.dump(token_info, f, indent=2)
+
+
+def _refresh_user_token(refresh_token: str) -> dict:
+    """Exchange refresh_token for new token_info. Raises on failure."""
+    data = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": dsp_secrets.spotify_client_id,
+        "client_secret": dsp_secrets.spotify_client_secret,
+    }
+    r = requests.post(
+        SPOTIFY_TOKEN_URL,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    j = r.json()
+    token_info = {
+        "access_token": j["access_token"],
+        "expires_in": j.get("expires_in", 3600),
+    }
+    if "refresh_token" in j:
+        token_info["refresh_token"] = j["refresh_token"]
+    token_info["expires_at"] = int(time.time()) + token_info["expires_in"]
+    return token_info
+
+
+def get_access_token(force_client_credentials: bool = False) -> Optional[str]:
+    """
+    Return an access token. Prefer user OAuth from .spotify_oauth_cache if present and valid,
+    otherwise client credentials. Returns None only if both fail.
+    Use force_client_credentials=True to skip user cache (e.g. for testing).
+    """
+    if not force_client_credentials:
+        cached = _load_oauth_cache()
+        if cached:
+            try:
+                refresh = cached.get("refresh_token")
+                access = cached.get("access_token")
+                expires_at = cached.get("expires_at", 0)
+                if refresh and (not expires_at or time.time() >= expires_at - 60):
+                    refreshed = _refresh_user_token(refresh)
+                    if "refresh_token" not in refreshed and refresh:
+                        refreshed["refresh_token"] = refresh
+                    _save_oauth_cache(refreshed)
+                    return refreshed["access_token"]
+                if access and expires_at and time.time() < expires_at - 60:
+                    return access
+                if access and not expires_at:
+                    return access
+            except Exception:
+                pass
+    try:
+        return _request_client_credentials_token()
+    except Exception:
+        return None
+
+
+def get_client_credentials_token() -> Optional[str]:
+    """Get app-only (client credentials) token. For testing or when user token is not used."""
+    try:
+        return _request_client_credentials_token()
+    except Exception:
+        return None
+
+
+def request_playlist_tracks_page(
+    playlist_id: str,
+    access_token: str,
+    limit: int = 50,
+    offset: int = 0,
+    market: str = "US",
+    fields: Optional[str] = PLAYLIST_ITEMS_FIELDS,
+) -> dict:
+    """
+    GET one page of playlist items (non-deprecated endpoint).
+    Returns raw API response (items, total, next, ...). Each item has track with name, artists, duration_ms, album.
+    Uses Authorization: Bearer <token>. Default fields request all track details needed for downstream.
+    """
+    url = f"{SPOTIFY_API_BASE}/playlists/{playlist_id}/items"
+    params = {"limit": limit, "offset": offset, "market": market}
+    if fields is not None:
+        params["fields"] = fields
+    r = requests.get(
+        url,
+        params=params,
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    return r.json()
 
 
 def fetch_playlist_tracks(playlist_id: str):
@@ -100,17 +210,20 @@ def fetch_playlist_tracks(playlist_id: str):
     Fetch all tracks from a Spotify playlist. Uses user OAuth if available,
     else client credentials. Returns list of dicts: name, artists (str), duration_ms.
     """
-    sp = get_spotify_client()
+    token = get_access_token()
+    if not token:
+        raise RuntimeError("Failed to get Spotify access token (client credentials and user cache failed).")
 
     tracks = []
     offset = 0
     total = 1
+    limit = 50  # API max per request
     while offset < total:
-        resp = sp.playlist_tracks(playlist_id, offset=offset, limit=100, market="US")
+        resp = request_playlist_tracks_page(playlist_id, token, limit=limit, offset=offset, market="US")
         if offset == 0:
-            total = resp["total"]
-        for item in resp.get("items", []):
-            t = item.get("track")
+            total = resp.get("total", 0)
+        for entry in resp.get("items", []):
+            t = _track_from_playlist_item(entry)
             if t is None:
                 continue
             name = (t.get("name") or "").strip()
@@ -119,7 +232,7 @@ def fetch_playlist_tracks(playlist_id: str):
             artists = ", ".join(a.get("name", "") for a in (t.get("artists") or []) if a.get("name"))
             duration_ms = t.get("duration_ms") or 0
             tracks.append({"name": name, "artists": artists, "duration_ms": duration_ms})
-        offset += 100
+        offset += limit
     return tracks
 
 

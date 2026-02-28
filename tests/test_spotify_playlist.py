@@ -129,7 +129,6 @@ def test_pick_best_candidate_empty_returns_none():
 # --- Integration: Spotify fetch ---
 @pytest.mark.integration
 def test_fetch_playlist_tracks_url_1():
-    pytest.importorskip("spotipy")
     pid = spotify_playlist.parse_playlist_id(PLAYLIST_URL_1)
     assert pid
     tracks = spotify_playlist.fetch_playlist_tracks(pid)
@@ -142,7 +141,6 @@ def test_fetch_playlist_tracks_url_1():
 
 @pytest.mark.integration
 def test_fetch_playlist_tracks_url_2():
-    pytest.importorskip("spotipy")
     pid = spotify_playlist.parse_playlist_id(PLAYLIST_URL_2)
     assert pid
     tracks = spotify_playlist.fetch_playlist_tracks(pid)
@@ -157,7 +155,6 @@ def test_fetch_playlist_tracks_url_2():
 @pytest.mark.slow
 def test_run_pipeline_limit_2_tracks(tmp_path):
     """Run full pipeline for first playlist with limit=2; assert 2 files exist with ARTIST - TITLE pattern."""
-    pytest.importorskip("spotipy")
     out_dir = str(tmp_path / "playlist_out")
     results = spotify_playlist.run_pipeline(PLAYLIST_URL_1, out_dir, track_limit=2)
     assert len(results) <= 2
@@ -174,7 +171,6 @@ def test_run_pipeline_limit_2_tracks(tmp_path):
 # --- Integration: search + best match (one track) ---
 @pytest.mark.integration
 def test_search_and_best_match_one_track():
-    pytest.importorskip("spotipy")
     pid = spotify_playlist.parse_playlist_id(PLAYLIST_URL_1)
     tracks = spotify_playlist.fetch_playlist_tracks(pid)
     assert len(tracks) >= 1
