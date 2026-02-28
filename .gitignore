@@ -1,3 +1,4 @@
 /test_downloads
 /saved_tracks
 dsp_secrets.py
+.spotify_oauth_cache

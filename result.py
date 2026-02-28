@@ -74,12 +74,14 @@ class ResultElement:
 
     def download(self, filepath):
         if self.type == 'yt':
-            self.file_location = download.download_yt(self.url, filepath=filepath, format='mp3')
-            if self.file_location[-4:] != '.mp3':
+            self.file_location = download.download_yt(
+                self.url, filepath=filepath, format='mp3',
+                artist=self.artist, title=self.title
+            )
+            if self.file_location and self.file_location[-4:] != '.mp3':
                 self.file_location = self.file_location[:-4] + '.mp3'
         elif self.type == 'sc':
             self.file_location = download.download_sc(self.url, filepath=filepath)
-        
         self.is_downloaded = True
     
     def get_audio(self):
@@ -93,7 +95,10 @@ class ResultElement:
         if self.type == 'sc':
             shutil.copy(self.file_location, download_path)
         elif self.type == 'yt':
-            download.download_yt(self.url, filepath=download_path, format='wav')
+            download.download_yt(
+                self.url, filepath=download_path, format='wav',
+                artist=self.artist, title=self.title
+            )
 
     def clear(self):
         if os.path.exists(self.file_location):

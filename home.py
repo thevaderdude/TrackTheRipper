@@ -2,14 +2,15 @@
 # has all the streamlit stuff (maybe make classes and stuff in other files.)
 # just the declarative UI modules and high-level logic
 
-import streamlit as st 
-
+import os
+import streamlit as st
 import search
 import result
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import queue
 import util
+import spotify_playlist
 
 
 TITLE_FIX_MD = """
@@ -49,8 +50,9 @@ ss.setdefault("total", 0)
 ss.setdefault("executor", None)
 ss.setdefault("items_snapshot", None)
 ss.setdefault("search_results", None)
+ss.setdefault("playlist_results", None)  # list of {track_name, status, path?, error?} after playlist run
 
-           # frozen items for the current run
+# frozen items for the current run
 
 def do_rerun():
     if hasattr(st, 'rerun'):
@@ -91,8 +93,49 @@ def start_job(s_result: result.Result, max_workers: int):
 
 
 
-st.title('search2mp3')
+st.title("search2mp3")
 
+# --- Spotify playlist section ---
+st.subheader("Spotify playlist")
+with st.form("spotify_playlist"):
+    playlist_url = st.text_input(
+        label="Playlist URL",
+        placeholder="https://open.spotify.com/playlist/...",
+        help="Paste a Spotify playlist link to download best-match audio for each track.",
+    )
+    playlist_track_limit = st.number_input(
+        label="Track limit (optional)",
+        min_value=0,
+        value=0,
+        step=1,
+        help="0 = download all tracks. Set to e.g. 3 for a quick test.",
+    )
+    playlist_submitted = st.form_submit_button("Download playlist")
+
+if playlist_submitted and playlist_url:
+    playlist_id = spotify_playlist.parse_playlist_id(playlist_url)
+    if not playlist_id:
+        st.error("Invalid playlist URL.")
+    else:
+        out_dir = os.path.join("saved_tracks", f"playlist_{playlist_id}")
+        os.makedirs(out_dir, exist_ok=True)
+        limit = int(playlist_track_limit) if playlist_track_limit and playlist_track_limit > 0 else None
+        with st.spinner("Fetching playlist and downloading tracks…"):
+            ss.playlist_results = spotify_playlist.run_pipeline(
+                playlist_url, out_dir, track_limit=limit
+            )
+        st.success(f"Done. Saved to `{out_dir}`.")
+
+if ss.playlist_results:
+    st.write("**Results**")
+    for r in ss.playlist_results:
+        if r.get("status") == "ok":
+            st.write(f"✓ {r.get('track_name', '?')} → `{r.get('path', '')}`")
+        else:
+            st.error(f"✗ {r.get('track_name', '?')}: {r.get('error', '')}")
+
+# --- Single search section ---
+st.subheader("Search single track")
 
 with st.form('search'):
     row = st.columns([4, 1], vertical_alignment='bottom')
