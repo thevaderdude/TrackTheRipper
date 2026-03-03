@@ -205,6 +205,29 @@ def request_playlist_tracks_page(
     return r.json()
 
 
+def fetch_playlist_details(playlist_id: str) -> dict:
+    """
+    Fetch playlist metadata (name, cover image). Uses same token as other API calls.
+    Returns dict with keys: name (str), image_url (str or None).
+    Raises on 404/403 or missing token.
+    """
+    token = get_access_token()
+    if not token:
+        raise RuntimeError("Failed to get Spotify access token.")
+    url = f"{SPOTIFY_API_BASE}/playlists/{playlist_id}"
+    r = requests.get(
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    data = r.json()
+    name = (data.get("name") or "").strip() or "Untitled playlist"
+    images = data.get("images") or []
+    image_url = images[0].get("url") if images else None
+    return {"name": name, "image_url": image_url}
+
+
 def fetch_playlist_tracks(playlist_id: str):
     """
     Fetch all tracks from a Spotify playlist. Uses user OAuth if available,
@@ -407,48 +430,154 @@ def pick_best_candidate(
     }
 
 
+def _get_sorted_candidates(
+    spotify_track: dict,
+    yt_results: list,
+    sc_results: list,
+    top_n: int = 5,
+    weight_views: float = WEIGHT_VIEWS,
+    weight_title: float = WEIGHT_TITLE,
+    weight_length: float = WEIGHT_LENGTH,
+) -> list:
+    """
+    Return up to top_n candidates sorted by score (best first), each with keys url, type, artist, title.
+    Used to try multiple candidates when the first download fails (e.g. 403).
+    """
+    name = spotify_track.get("name") or ""
+    artists = spotify_track.get("artists") or ""
+    duration_ms = spotify_track.get("duration_ms") or 0
+    reference_str = f"{artists} - {name}"
+
+    candidates = []
+    for r in yt_results or []:
+        if not r:
+            continue
+        title = (r.get("title") or "").strip()
+        channel = (r.get("channel") or "").strip()
+        url = r.get("url") or ""
+        if not url:
+            continue
+        dur_ms = parse_yt_duration(r.get("duration") or "")
+        views = parse_yt_views(r.get("views") or "")
+        candidates.append({
+            "type": "yt",
+            "url": url,
+            "artist": channel,
+            "title": title,
+            "duration_ms": dur_ms,
+            "views": views,
+        })
+    for r in sc_results or []:
+        if not r:
+            continue
+        title = (r.get("title") or "").strip()
+        artist = (r.get("artist") or "").strip() or (r.get("username") or "").strip()
+        link = r.get("link") or ""
+        if not link:
+            continue
+        dur_ms = r.get("duration_ms") or r.get("duration") or 0
+        if isinstance(dur_ms, str):
+            dur_ms = 0
+        plays = r.get("plays") or r.get("playback_count") or 0
+        if isinstance(plays, str):
+            plays = parse_yt_views(plays.replace(",", ""))
+        candidates.append({
+            "type": "sc",
+            "url": link,
+            "artist": artist,
+            "title": title,
+            "duration_ms": int(dur_ms),
+            "views": int(plays),
+        })
+
+    if not candidates:
+        return []
+
+    max_views = max(c.get("views", 0) or 0 for c in candidates)
+    for c in candidates:
+        view_score = _normalize_view_score(c.get("views") or 0, max_views) if max_views else 0
+        title_score = title_similarity(reference_str, c.get("title") or "")
+        length_score_val = length_score(c.get("duration_ms") or 0, duration_ms)
+        c["_total"] = (
+            weight_views * view_score +
+            weight_title * title_score +
+            weight_length * length_score_val
+        )
+    sorted_candidates = sorted(candidates, key=lambda c: c["_total"], reverse=True)
+    return [
+        {"url": c["url"], "type": c["type"], "artist": c["artist"], "title": c["title"]}
+        for c in sorted_candidates[:top_n]
+    ]
+
+
 def _run_download_loop(tracks, output_dir, retries_per_track):
-    """Shared loop: for each track find best YT/SC candidate and download. Returns results list."""
+    """
+    Shared loop: for each track find best YT/SC candidate and download.
+    Returns list of dicts: track_name, status ('ok'|'error'), path?, error?,
+    source_type? ('yt'|'sc'), source_url?, source_title?.
+    """
     results = []
     for i, st in enumerate(tracks):
         name = st.get("name", "?")
         artists = st.get("artists", "")
         display = f"{artists} - {name}" if artists else name
         last_error = None
+        downloaded = False
         for attempt in range(max(1, retries_per_track)):
-            try:
-                # Search (with retries inside search module)
-                yt_list = search.search_youtube(f"{artists} - {name}", limit=8)
-                sc_list = search.search_soundcloud(f"{artists} - {name}", limit=8)
-                if not isinstance(yt_list, list):
-                    yt_list = []
-                if not isinstance(sc_list, list):
-                    sc_list = []
-
-                best = pick_best_candidate(st, yt_list, sc_list)
-                if not best:
-                    last_error = "No search results"
-                    continue
-
-                # Download with retries (handled inside download module when we add it)
-                if best["type"] == "yt":
-                    path = download.download_yt(
-                        best["url"],
-                        output_dir,
-                        format="mp3",
-                        artist=best["artist"],
-                        title=best["title"],
-                    )
-                else:
-                    path = download.download_sc(best["url"], output_dir)
-                results.append({"track_name": display, "status": "ok", "path": path})
-                last_error = None
+            if downloaded:
                 break
-            except Exception as e:
-                last_error = str(e)
+            yt_list = search.search_youtube(f"{artists} - {name}", limit=8)
+            sc_list = search.search_soundcloud(f"{artists} - {name}", limit=8)
+            if not isinstance(yt_list, list):
+                yt_list = []
+            if not isinstance(sc_list, list):
+                sc_list = []
+
+            # Try up to 5 candidates (best first); when one fails (e.g. 403) try the next
+            candidates = _get_sorted_candidates(st, yt_list, sc_list, top_n=5)
+            if not candidates:
+                last_error = "No search results"
                 time.sleep(1 + attempt)
-        if last_error is not None:
-            results.append({"track_name": display, "status": "error", "error": last_error})
+                continue
+
+            for best in candidates:
+                try:
+                    source_title = f"{best.get('artist', '')} - {best.get('title', '')}".strip() or best.get("title", "") or ""
+                    if best["type"] == "yt":
+                        path = download.download_yt(
+                            best["url"],
+                            output_dir,
+                            format="mp3",
+                            artist=best["artist"],
+                            title=best["title"],
+                        )
+                    else:
+                        path = download.download_sc(best["url"], output_dir)
+                    results.append({
+                        "track_name": display,
+                        "status": "ok",
+                        "path": path,
+                        "source_type": best["type"],
+                        "source_url": best["url"],
+                        "source_title": source_title or None,
+                    })
+                    downloaded = True
+                    break
+                except Exception as e:
+                    last_error = str(e)
+                    time.sleep(0.5)  # brief pause before trying next candidate
+            if downloaded:
+                break
+            time.sleep(1 + attempt)
+        if not downloaded:
+            results.append({
+                "track_name": display,
+                "status": "error",
+                "error": last_error or "No search results",
+                "source_type": None,
+                "source_url": None,
+                "source_title": None,
+            })
         time.sleep(0.3)  # rate limit between tracks
     return results
 
@@ -473,7 +602,7 @@ def run_pipeline(
 ):
     """
     Full pipeline: fetch playlist, for each track find best YT/SC candidate and download.
-    Returns list of per-track results: {track_name, status: 'ok'|'error', path?: str, error?: str}.
+    Returns list of per-track results: {track_name, status, path?, error?, source_type?, source_url?, source_title?}.
     """
     playlist_id = parse_playlist_id(playlist_url)
     if not playlist_id:

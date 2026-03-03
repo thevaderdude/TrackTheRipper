@@ -1,10 +1,18 @@
+import os
 import re
 import time
 import yt_dlp
-from sclib import SoundcloudAPI, Track, Playlist
 import dsp_secrets
 
-api = SoundcloudAPI(client_id=dsp_secrets.sc_client_id)
+# Use project-local cache dir (avoid .cache which may exist as a file in this repo)
+_YT_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ytdlp_cache")
+
+try:
+    from sclib import SoundcloudAPI, Track, Playlist
+    _sc_api = SoundcloudAPI(client_id=dsp_secrets.sc_client_id)
+except ImportError:
+    _sc_api = None
+    Track = None  # type: ignore
 
 DOWNLOAD_RETRIES = 3
 DOWNLOAD_BACKOFF = 2.0
@@ -35,13 +43,17 @@ def download_yt(url, filepath, format='wav', artist=None, title=None):
             safe_title = sanitize_filename_part(title, max_len=_MAX_FILENAME_LEN - len(safe_artist) - 3)
             combined = f"{safe_artist} - {safe_title}"
         custom_basename = combined
+    os.makedirs(_YT_CACHE_DIR, exist_ok=True)
     ydl_opts = {
-        'format': 'wav/bestaudio/best',
+        'format': 'bestaudio/best',
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': format,
         }],
-        'paths': {'home': filepath}
+        'paths': {'home': filepath},
+        'cachedir': _YT_CACHE_DIR,
+        # Try alternative YouTube clients to reduce 403 Forbidden
+        'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
     }
     if custom_basename:
         # outtmpl is relative to paths.home, so use basename only to avoid path duplication
@@ -69,10 +81,14 @@ def download_yt(url, filepath, format='wav', artist=None, title=None):
 
 
 def download_sc(url, filepath):
+    if _sc_api is None:
+        raise RuntimeError(
+            "SoundCloud support not installed. Install with: pip install soundcloud-lib"
+        )
     last_error = None
     for attempt in range(DOWNLOAD_RETRIES):
         try:
-            track = api.resolve(url)
+            track = _sc_api.resolve(url)
             if type(track) is not Track:
                 raise TypeError(f"Expected Track, got {type(track)}")
             safe_artist = sanitize_filename_part(track.artist)
